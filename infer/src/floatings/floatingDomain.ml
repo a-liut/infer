@@ -1,30 +1,41 @@
 (* Copyright (c) 2019-present 5Kids *)
 
 open! IStd
-open! Float
+
 module F = Format
 module Hashtbl = Caml.Hashtbl
 
+(**
+type t =
+| Infinite
+| Nan
+| Normal
+| Subnormal
+| Zero *)
+
 (* The following min, max, eq functions cope with the sign of 0. and with NaN *)
 let min_nan (a:float) (b:float) : float =
-  match (classify_float a, classify_float b) with
-  | (FP_nan, _) | (_, FP_nan) -> nan
-  | (FP_zero, FP_zero) -> if (min (copysign 1. a) (copysign 1. b))=(-1.) then (-0.) else 0.
+  let open Float in
+  match (classify a, classify b) with
+  | (Nan, _) | (_, Nan) -> nan
+  | (Zero, Zero) ->
+    if (min (copysign 1. a) (copysign 1. b)) = (-1.) then (-0.) else 0.
   | _ -> min a b
 
 let max_nan (a:float) (b:float) : float =
-  match (classify_float a, classify_float b) with
-  | (FP_nan, _) | (_, FP_nan) -> nan
-  | (FP_zero, FP_zero) -> if (max (copysign 1. a) (copysign 1. b))=1. then 0. else (-0.)
+  let open Float in
+  match (classify a, classify b) with
+  | (Nan, _) | (_, Nan) -> nan
+  | (Zero, Zero) -> if (max (copysign 1. a) (copysign 1. b))=1. then 0. else (-0.)
   | _ -> max a b
 
 let eq_nan (a:float) (b:float) : bool =
-  match (classify_float a, classify_float b) with
-  | (FP_nan, FP_nan) -> true
-  | (FP_nan, _)
-  | (_, FP_nan) -> false
-  | (FP_zero, FP_zero) -> (copysign 1. a) = (copysign 1. b)
-  | _ -> a=b
+  let open Float in
+  match (classify a, classify b) with
+  | (Nan, Nan) -> true
+  | (_, Nan) | (Nan, _) -> false
+  | (Zero, Zero) -> (copysign 1. a) = (copysign 1. b)
+  | _ -> a = b
 
 (** Add pp or unneeded? *)
 
@@ -59,7 +70,7 @@ module Range_el = struct
       in canonic_range (Range (max a_l b_l, min a_u b_u))
 end
 
-let all_R = Range_el.Range (neg_infinity, infinity)
+let all_R = Range_el.Range (Float.neg_infinity, Float.infinity)
 
 module Range_el_opt = struct
   type t = Range_el.t option
@@ -86,39 +97,43 @@ module Range_el_opt = struct
   let plus (a:t) (b:t) : t =
     match (a,b) with
     | (Some (Range_el.Range (a_l, a_u)), Some (Range_el.Range (b_l, b_u)))
-        -> Some (Range_el.Range (a_l+b_l, a_u+b_u))
+        -> Some (Range_el.Range (a_l+.b_l, a_u+.b_u))
     | _ -> None
 
   let minus (a:t) (b:t) : t =
-    match (a,b) with
+    match (a, b) with
+    | (Some (Range_el.Range (a_l, a_u)), Some (Range_el.Range (b_l, b_u)))
+        -> Some (Range_el.Range (a_l-.b_u, a_u-.b_l))
+    | _ -> None
+
+  let mult (a:t) (b:t) : t =
+    match (a, b) with
     | (Some (Range_el.Range (a_l, a_u)), Some (Range_el.Range (b_l, b_u)))
         -> Some (Range_el.Range (a_l-b_u, a_u-b_l))
     | _ -> None
-<<<<<<< Updated upstream
 
   let div (a:t) (b:t) : t =
+    let open Float in
     match (a, b) with
-    | (Some (Range_el.Range (a_l, a_u)), Some (Range_el.Range (b_l, b_u))) 
+    | (Some (Range_el.Range (a_l, a_u)), Some (Range_el.Range (b_l, b_u)))
         -> (let extr = [a_l/.b_l ; a_l/.b_u ; a_u/.b_l ; a_u/.b_u]
         in match [(copysign 1. a_l) = (copysign 1. a_u); (copysign 1. b_l) = (copysign 1. b_u)] with
-        | [_; true] 
+        | [_; true]
           -> let (Some r_l, Some r_u) = ((List.reduce ~f:min_nan extr), (List.reduce ~f:max_nan extr))
           in Some (Range_el.Range (r_l, r_u))
         | [true; false] when not (a_l=0. || a_u=0.) -> Some all_R
         | _ -> Some (Range_el.Range (nan, nan)))
-    | _ -> None  
+    | _ -> None
 
   let open_left (a:t) : t =
     match a with
-    | Some (Range_el.Range (l, r)) when not (eq_nan l nan) -> Some (Range_el.Range (neg_infinity, r))
+    | Some (Range_el.Range (l, r)) when not (eq_nan l Float.nan) -> Some (Range_el.Range (Float.neg_infinity, r))
     | _ -> a
 
   let open_right (a:t) : t =
     match a with
-    | Some (Range_el.Range (l, r)) when not (eq_nan r nan) -> Some (Range_el.Range (l, infinity))
+    | Some (Range_el.Range (l, r)) when not (eq_nan r Float.nan) -> Some (Range_el.Range (l, Float.infinity))
     | _ -> a
-=======
->>>>>>> Stashed changes
 end
 
 (* (Ocaml) -- First steps to make this parametric... **)
@@ -140,12 +155,8 @@ let alias_add {aliases = tbl} k v = Hashtbl.add tbl k v
 let alias_replace {aliases = tbl} k v = Hashtbl.replace tbl k v
 let copy {ranges; aliases} = {ranges = Hashtbl.copy ranges; aliases = Hashtbl.copy aliases}
 
-<<<<<<< Updated upstream
-let ( <= ) ~lhs ~rhs = 
-  let ({ranges = l}, {ranges = r}) = (lhs, rhs) in
-=======
 let ( <= ) ~lhs ~rhs =
->>>>>>> Stashed changes
+  let ({ranges = l}, {ranges = r}) = (lhs, rhs) in
   let cmp (k:string) (v:Range_el.t) (cum:bool) =
     cum && Range_el_opt.(<=) (Some v) (Hashtbl.find_opt r k)
   in Hashtbl.fold cmp l true
@@ -166,15 +177,13 @@ let join = combine ~combiner:Range_el_opt.merge
 (* constrain may be used when there is a Prune (a guard) *)
 let constrain = combine ~combiner:Range_el_opt.constrain
 
-let widening_threshold = 5          (** CHECK *)
+let max_iters = 5          (** CHECK *)
 
 let widen ~prev ~next ~num_iters =
-  join prev next
-(**  if num_iters<widening_threshold
-    then join prev next
-  else next *)
+  if phys_equal prev next || Int.(num_iters >= max_iters) then prev
+  else join prev next
 
-let pp _ _ = ()
+let pp f _ = F.pp_print_string f "()"
 
 let initial:t = {ranges = Hashtbl.create 100; aliases = Hashtbl.create 100}
 
